@@ -24,6 +24,8 @@ dependencies = [
     "datasets",
     "fvcore",
     "scipy",
+    "pycocotools>=2.0.7",
+    "tdqm",
 ]
 
 [project.optional-dependencies]
