@@ -23,6 +23,7 @@ dependencies = [
     "tokenizers",
     "datasets",
     "fvcore",
+    "scipy",
 ]
 
 [project.optional-dependencies]
