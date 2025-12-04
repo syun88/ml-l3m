@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 log.md
+.DS_Store
 
 wwwwwdb.yaml
 .hf.yaml
