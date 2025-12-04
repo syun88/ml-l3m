@@ -9,6 +9,7 @@ from typing import Any
 import torch
 import wandb
 from torch.optim import Optimizer
+from tqdm.auto import tqdm
 
 from l3m.helpers.dist import utils as dist_utils
 from l3m.helpers.dist.cp import create_context_parallel_ctx, get_train_context
@@ -83,6 +84,12 @@ def train(
     print_freq = 10
 
     train_context = get_train_context(enable_loss_parallel)
+    progress_bar = tqdm(
+        total=total_iters - start_iteration,
+        initial=0,
+        desc="train",
+        disable=not dist_utils.is_main_process(),
+    )
 
     for it, batch in enumerate(
         metric_logger.log_every(data_loader, print_freq, start=start_iteration, max_iterations=total_iters)
@@ -129,7 +136,8 @@ def train(
 
         optimizer.zero_grad(set_to_none=True)
 
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         if dist_utils.is_main_process() and wandb.run is not None:
             wandb.log(
@@ -150,8 +158,10 @@ def train(
         do_ckpt_save_callback = ckpt_save_freq is not None and (iteration + 1) % ckpt_save_freq == 0
         if do_test_callback or do_ckpt_save_callback:
             evaluator_callback(iteration=iteration)
+        progress_bar.update(1)
 
     # gather the stats from all processes
+    progress_bar.close()
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats:{str(metric_logger)}")
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
@@ -189,6 +199,11 @@ def evaluate(
     prefix = f"test_{dataset_name}"
 
     model.eval()  # switch to evaluation mode
+    progress_bar = tqdm(
+        total=len(data_loader),
+        desc=header,
+        disable=not dist_utils.is_main_process(),
+    )
 
     for batch_id, batch in enumerate(metric_logger.log_every(data_loader, 10, header, max_iterations=len(data_loader))):
         batch = move_to_device(batch, device=device)
@@ -209,8 +224,10 @@ def evaluate(
 
         for k, v in stats.items():
             metric_logger.meters[f"{prefix}_{k}"].update(v, n=batch_size)
+        progress_bar.update(1)
 
     # gather the stats from all processes
+    progress_bar.close()
     metric_logger.synchronize_between_processes()
     stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     stats.update(metrics_computer.apply_postprocessing(stats, prefix=prefix))

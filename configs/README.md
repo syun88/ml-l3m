@@ -5,6 +5,7 @@ Here we provide a set of basic config files, namely:
 - AIMv2 pretraining (with an MoE variant) on an example HuggingFace dataset:
   [aimv2/001_aimv2_hfdata.yaml](aimv2/001_aimv2_hfdata.yaml) and
   [aimv2/002_aimv2_moe_hfdata.yaml](aimv2/002_aimv2_moe_hfdata.yaml)
+- AIMv2 with a DETR-style detection head: [aimv2_detr/001_aimv2_detr.yaml](aimv2_detr/001_aimv2_detr.yaml)
 - CLIP pretraining on an example HuggingFace dataset: [clip/001_clip_hfdata.yaml](clip/001_clip_hfdata.yaml)
 - Supervised ViT on ImageNet [supervised_imagenet/001_vit_large_imagenet.yaml](supervised_imagenet/001_vit_large_imagenet.yaml)
 - LLM pretraining on an example HuggingFace dataset: [text/001_llm_hfdata.yaml](text/001_llm_hfdata.yaml)

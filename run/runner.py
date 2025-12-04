@@ -155,6 +155,7 @@ def main(cfg) -> None:
 
         model.to(device)
 
+    fsdp_extras = {}
     if exp_cfg["distributed"]:
         if exp_cfg["fsdp"] is not None:
             model, fsdp_extras = fsdp.init_fsdp2(
@@ -165,6 +166,8 @@ def main(cfg) -> None:
             )
         else:
             raise ValueError("DDP is not supported anymore, please use FSDP.")
+    else:
+        fsdp_extras = {}
 
     if use_meta_device:
         # allocate memory

@@ -82,6 +82,11 @@ def init_distributed_mode(cfg: DictConfig) -> None:
         cfg: Experiment config.
     """
 
+    if cfg["experiment"].get("distributed") is False:
+        logger.info("Distributed disabled in config, running single process.")
+        cfg["experiment"]["distributed"] = False
+        return
+
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         cfg["experiment"]["rank"] = int(os.environ["RANK"])
         cfg["experiment"]["world_size"] = int(os.environ["WORLD_SIZE"])
@@ -93,8 +98,12 @@ def init_distributed_mode(cfg: DictConfig) -> None:
 
     cfg["experiment"]["distributed"] = True
 
-    torch.cuda.set_device(cfg["experiment"]["gpu"])  # set device based on local rank
-    cfg["experiment"]["dist_backend"] = "nccl"
+    # Choose backend based on availability
+    if torch.cuda.is_available():
+        torch.cuda.set_device(cfg["experiment"]["gpu"])  # set device based on local rank
+        cfg["experiment"]["dist_backend"] = "nccl"
+    else:
+        cfg["experiment"]["dist_backend"] = "gloo"  # CPU/MPS fallback
     logger.info(
         "| distributed init (rank {}): {}".format(cfg["experiment"]["rank"], "env://"),
     )

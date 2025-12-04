@@ -1,0 +1,226 @@
+constants:
+  # ========== VISION ==========
+  vision_embed_dim: 1024
+  vision_num_blocks: 24
+  vision_num_heads: 8
+  patch_size: 14
+  img_size: 224
+  num_queries: 100
+  num_classes: 80  # COCO has 80 categories
+  # ========== DATA ==========
+  batch_size_per_gpu: 4
+  seed: 0
+  # ========== TRANSFORMS ==========
+  train_transform:
+    _target_: l3m.data.huggingface.detection.DetectionTransform
+    image_size: ${constants.img_size}
+    hflip_prob: 0.5
+  eval_transform:
+    _target_: l3m.data.huggingface.detection.DetectionTransform
+    image_size: ${constants.img_size}
+    hflip_prob: 0.0
+
+# ==============================================================
+# DATA
+# ==============================================================
+data:
+  train:
+    dataset:
+      _target_: l3m.data.huggingface.detection.LocalCocoDetectionDataset
+      image_root: /Users/syun/datasets/coco/train2017
+      ann_file: /Users/syun/datasets/coco/annotations/instances_train2017.json
+      transforms: ${constants.train_transform}
+      max_boxes: 100
+      dataset_name: coco_train_local
+    dataloader:
+      _target_: torch.utils.data.DataLoader
+      _partial_: true
+      batch_size: ${constants.batch_size_per_gpu}
+      num_workers: 2
+      pin_memory: true
+      drop_last: true
+    collator:
+      _target_: l3m.data.vision.collators.detection_collator.DetectionCollator
+      _partial_: false
+  validation:
+    dataset:
+      _target_: l3m.data.huggingface.detection.LocalCocoDetectionDataset
+      image_root: /Users/syun/datasets/coco/val2017
+      ann_file: /Users/syun/datasets/coco/annotations/instances_val2017.json
+      transforms: ${constants.eval_transform}
+      max_boxes: 100
+      dataset_name: coco_val_local
+    dataloader:
+      _target_: torch.utils.data.DataLoader
+      _partial_: true
+      batch_size: ${constants.batch_size_per_gpu}
+      num_workers: 2
+      pin_memory: true
+      drop_last: false
+    collator:
+      _target_: l3m.data.vision.collators.detection_collator.DetectionCollator
+      _partial_: false
+
+# ==============================================================
+# OPTIM
+# ==============================================================
+optim:
+  grad_clip: 1.0
+  gradient_accumulation_steps: 1
+  optimizer:
+    _target_: l3m.optim.adamw_lh.AdamLH
+    _partial_: true
+    lr: 5e-4
+    betas: [0.9, 0.95]
+    eps: 1e-08
+    weight_decay: 1e-4
+  wd_exclude:
+  - '*bias*'
+  - '*pos_embed*'
+  - '*norm*'
+  - '*logit_scale*'
+  - '*cls_token*'
+  - '*positional_embedding*'
+  scheduler:
+    _target_: fvcore.common.param_scheduler.CompositeParamScheduler
+    schedulers:
+    - _target_: fvcore.common.param_scheduler.LinearParamScheduler
+      start_value: 1e-6
+      end_value: ${optim.optimizer.lr}
+    - _target_: fvcore.common.param_scheduler.CosineParamScheduler
+      start_value: ${optim.optimizer.lr}
+      end_value: 1e-5
+    absolute_lengths: true
+    interval_scaling: [rescaled, rescaled]
+    lengths: [2_500, 297_500]
+
+# ==============================================================
+# MODEL
+# ==============================================================
+model:
+  checkpoint:
+  meta_model:
+    _target_: l3m.model.meta_models.InSeriesMetaModels
+    models:
+      # ========== IMAGE ENCODER ==========
+      image_encoder:
+        _target_: l3m.model.meta_models.MetaModel
+        preprocessor:
+          _target_: l3m.model.preprocessors.vision.ViTPreprocessor
+          read_key: image
+          write_key: image_tokens
+          patchifier:
+            _target_: l3m.model.preprocessors.vision.PatchEmbed
+            img_size: ${constants.img_size}
+            patch_size: ${constants.patch_size}
+            in_chans: 3
+            embed_dim: ${constants.vision_embed_dim}
+            norm_layer:
+              _target_: l3m.model.layers.normalization.RMSNorm
+              _partial_: true
+              eps: 1e-5
+          pos_embed_type: absolute
+          drop_patches: false
+          cls_token: false
+        trunk:
+          _target_: l3m.model.trunks.transformer.Transformer
+          read_key: image_tokens
+          write_key: image_tokens
+          embed_dim: ${constants.vision_embed_dim}
+          num_blocks: ${constants.vision_num_blocks}
+          mlp_ratio: 4
+          ffn_target:
+            _target_: l3m.model.layers.ffn.SwiGLUFFN
+            _partial_: true
+          norm_layer:
+            _target_: l3m.model.layers.normalization.RMSNorm
+            _partial_: true
+            eps: 1e-5
+          attn_target:
+            _target_: l3m.model.layers.attention.GenericAttention
+            _partial_: true
+            dim: ${constants.vision_embed_dim}
+            num_heads: ${constants.vision_num_heads}
+            qkv_bias: false
+          weight_init_style: xavier_uniform
+          post_trunk_norm: true
+          use_bias: false
+        postprocessor:
+          _target_: torch.nn.Identity
+        head:
+          _target_: torch.nn.Identity
+      # ========== DETECTION HEAD ==========
+      detection_head:
+        _target_: l3m.model.meta_models.MetaModel
+        preprocessor:
+          _target_: torch.nn.Identity
+        trunk:
+          _target_: torch.nn.Identity
+        postprocessor:
+          _target_: torch.nn.Identity
+        head:
+          _target_: l3m.model.heads.detr.DETRHead
+          read_key: image_tokens
+          class_key: detr_pred_logits
+          box_key: detr_pred_boxes
+          aux_key: detr_aux_outputs
+          embed_dim: ${constants.vision_embed_dim}
+          num_queries: ${constants.num_queries}
+          num_classes: ${constants.num_classes}
+          num_decoder_layers: 6
+          num_heads: ${constants.vision_num_heads}
+          dropout: 0.1
+          use_aux_outputs: true
+          use_sine_pos_embed: true
+
+# ==============================================================
+# LOSS
+# ==============================================================
+loss:
+  _target_: l3m.loss.wrappers.MultiLossWrapper
+  criteria_weights: [1.0]
+  criteria:
+  - _target_: l3m.loss.detr_loss.DETRLoss
+    matcher:
+      _target_: l3m.loss.detr_loss.HungarianMatcher
+      class_cost: 1.0
+      bbox_cost: 5.0
+      giou_cost: 2.0
+    num_classes: ${constants.num_classes}
+    eos_coef: 0.1
+    logits_read_key: detr_pred_logits
+    boxes_read_key: detr_pred_boxes
+    aux_read_key: detr_aux_outputs
+    target_boxes_key: target_boxes
+    target_labels_key: target_labels
+    target_mask_key: target_boxes_mask
+
+# ==============================================================
+# EXPERIMENT
+# ==============================================================
+experiment:
+  start_iteration: 0
+  total_iterations: 300_000
+  ckpt_save_freq: 20_000
+  test_frequency: 10_000
+  torch_compile: false
+  dtype: float32
+  output_dir:
+  device: cpu  # CPU-only run
+  find_unused_parameters: false
+  seed: ${constants.seed}
+  dist_eval: false
+  distributed: false
+  world_size: 1
+  dist_url: env://
+  eval: false
+  resume:
+  amp_enabled: false
+  no_sync_gradient_accumulation: false
+  fsdp: null
+
+wandb:
+  use_wandb: true
+  watch_freq: 500
+  project: AIMv2_detr
+  tags: [aimv2_detr]

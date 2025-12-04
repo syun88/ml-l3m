@@ -126,13 +126,18 @@ def setup_wandb(name: str, wandb_cfg: dict[str, str], cfg: omegaconf.DictConfig,
     """
 
     with open(wandb_cfg["wandb_config"]) as fin:
-        wandb_config = yaml.safe_load(fin)
+        wandb_config = yaml.safe_load(fin) or {}
 
-    os.environ["WANDB_BASE_URL"] = wandb_config["host-name"]
-    os.environ["WANDB_API_KEY"] = wandb_config["api-key"]
+    host = wandb_config.get("host-name") or os.environ.get("WANDB_BASE_URL") or "https://api.wandb.ai"
+    api_key = wandb_config.get("api-key") or os.environ.get("WANDB_API_KEY")
+    entity = wandb_config.get("entity") or wandb_cfg.get("entity", None)
+
+    os.environ["WANDB_BASE_URL"] = host
+    if api_key:
+        os.environ["WANDB_API_KEY"] = api_key
     wandb.init(
         name=name,
-        entity=wandb_config["entity"],
+        entity=entity,
         project=wandb_cfg["project"],
         tags=wandb_cfg["tags"],
         config=OmegaConf.to_container(cfg),
